@@ -20,19 +20,23 @@ class resnet(nn.Module):
 
     def forward(self, x, select_layer):
         layers = {}
-        #x = self.normalize(x)
+        output = {}
+
         x = self.model.conv1(x)
         x = self.model.bn1(x)
         x = self.model.relu(x)
         x = self.model.maxpool(x)
 
         x = self.model.layer1(x)
+        layers["conv_1"] = x
         x = self.model.layer2(x)
+        layers["conv_2"] = x
         x = self.model.layer3(x)
+        layers["conv_3"] = x
         x = self.model.layer4(x, fake_relu = True)
-        
-        for name in layers:
-            if name not in select_layer:
-                del layers[name]
+        layers["conv_4"] = x
 
-        return layers
+        for name in select_layer:
+            output[name] = layers[name]
+
+        return output
