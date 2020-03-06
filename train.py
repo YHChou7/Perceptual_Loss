@@ -16,7 +16,7 @@ import torchvision.models as models
 import utils
 from model import TransformerNet
 from vgg16 import vgg16
-
+from resnet import resnet
 
 
 def check_paths(args):
@@ -32,8 +32,12 @@ def check_paths(args):
 
 def train(args):
     device = torch.device("cuda" if args.cuda else "cpu")
-    content_layer = ['relu_4']
-    style_layer = ['relu_2', 'relu_4', 'relu_7', 'relu_10']
+    if args.backbone == "vgg":
+        content_layer = ['relu_4']
+        style_layer = ['relu_2', 'relu_4', 'relu_7', 'relu_10']
+    elif args.backbone == "resnet":
+        content_layer = ["conv_3"]
+        style_layer = ["conv_1", "conv_2", "conv_3", "conv_4"]
 
     total_layer = list(dict.fromkeys(content_layer + style_layer))
 
@@ -54,8 +58,11 @@ def train(args):
     optimizer = Adam(transformer.parameters(), args.lr)
     mse_loss = torch.nn.MSELoss()
     
+    if args.backbone == "vgg":
+        loss_model = vgg16().eval().to(device)
+    elif args.backbone == "resnet":
+        loss_model = resnet().eval().to(device)
 
-    vgg = vgg16().eval().to(device)
     style_transform = transforms.Compose([
         transforms.ToTensor(),
         transforms.Lambda(lambda x: x.mul(255))
@@ -63,9 +70,9 @@ def train(args):
     style = utils.load_image(args.style_image, size=args.style_size)
     style = style_transform(style)
     style = style.repeat(args.batch_size, 1, 1, 1).to(device)
-
-    feature_style = vgg(utils.normalize_batch(style), style_layer)
+    feature_style = loss_model(utils.normalize_batch(style), style_layer)
     gram_style = {key: utils.gram_matrix(val) for key, val in feature_style.items()}
+
     for e in range(args.epochs):
         transformer.train()
         agg_content_loss = 0.
@@ -78,12 +85,12 @@ def train(args):
 
             x = x.to(device)
             y = transformer(x)
-
+    
             y = utils.normalize_batch(y)
             x = utils.normalize_batch(x)
 
-            feature_y = vgg(y, total_layer)
-            feature_x = vgg(x, content_layer)
+            feature_y = loss_model(y, total_layer)
+            feature_x = loss_model(x, content_layer)
             
             content_loss = 0.
             for layer in content_layer:
@@ -143,7 +150,7 @@ def stylize(args):
         output = stylize_onnx_caffe2(content_image, args)
     else:
         with torch.no_grad():
-            style_model = TransformerNet()
+            style_model = TransformerNet().eval()
             state_dict = torch.load(args.model)
             # remove saved deprecated running_* keys in InstanceNorm from the checkpoint
             for k in list(state_dict.keys()):
@@ -199,6 +206,9 @@ def main():
                                   help="number of images after which the training loss is logged, default is 500")
     train_arg_parser.add_argument("--checkpoint-interval", type=int, default=2000,
                                   help="number of batches after which a checkpoint of the trained model will be created")
+    train_arg_parser.add_argument("--backbone", type=str, default="vgg",
+                                  help="The backbone of calculate perceptual loss")
+
 
     eval_arg_parser = subparsers.add_parser("eval", help="parser for evaluation/stylizing arguments")
     eval_arg_parser.add_argument("--content-image", type=str, required=True,
